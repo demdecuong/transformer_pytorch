@@ -12,7 +12,9 @@ import torch
 import tarfile
 import torchtext.data
 import torchtext.datasets
+import pandas as pd
 from torchtext.datasets import TranslationDataset
+from torchtext.data import TabularDataset
 import transformer.Constants as Constants
 from learn_bpe import learn_bpe
 from apply_bpe import BPE
@@ -157,6 +159,26 @@ def encode_files(bpe, src_in_file, trg_in_file, data_dir, prefix):
     return src_out_file, trg_out_file
 
 
+def get_data_from_txt(path):
+    data = []
+    with open(path,'r',encoding='utf-8') as f:
+        for line in f:
+            data.append(line.replace('\n',''))
+    return data
+
+def get_raw_data(folder,option = 'train'):
+    raw_files = { "src": [], "trg": [], }
+    if option == 'train':
+        src_path = folder + 'train.txt.src'
+        trg_path = folder + 'train.txt.tgt.tagged'
+    else:
+        src_path = folder + 'val.txt.src'
+        trg_path = folder + 'val.txt.tgt.tagged'
+    raw_files['src'] = get_data_from_txt(src_path)
+    raw_files['trg'] = get_data_from_txt(trg_path)
+
+    return raw_files
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('-raw_dir', required=True)
@@ -239,7 +261,98 @@ def main():
     print('[Info] Dumping the processed data to pickle file', opt.save_data)
     pickle.dump(data, open(opt.save_data, 'wb'))
 
+def main_vi():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('-save_data', required=True)
+    parser.add_argument('-data_src', type=str, default=None)
+    parser.add_argument('-data_trg', type=str, default=None)
 
+    parser.add_argument('-max_len', type=int, default=110)
+    parser.add_argument('-min_word_count', type=int, default=2)
+    parser.add_argument('-keep_case', action='store_true')
+    parser.add_argument('-share_vocab', action='store_true')
+    #parser.add_argument('-ratio', '--train_valid_test_ratio', type=int, nargs=3, metavar=(8,1,1))
+    #parser.add_argument('-vocab', default=None)
+
+    opt = parser.parse_args()
+    assert not any([opt.data_src, opt.data_trg]), 'Custom data input is not support now.'
+    assert not any([opt.data_src, opt.data_trg]) or all([opt.data_src, opt.data_trg])
+    print(opt)
+    import re
+
+    def tokenize(text):
+        text = re.sub('([.,!?()])', r' \1 ', text)
+        text = re.sub('\s{2,}', ' ', text)
+        return text.split(' ')
+
+    SRC = torchtext.data.Field(
+        tokenize=tokenize, lower=not opt.keep_case,
+        pad_token=Constants.PAD_WORD, init_token=Constants.BOS_WORD, eos_token=Constants.EOS_WORD)
+
+    TRG = torchtext.data.Field(
+        tokenize=tokenize, lower=not opt.keep_case,
+        pad_token=Constants.PAD_WORD, init_token=Constants.BOS_WORD, eos_token=Constants.EOS_WORD)
+
+    MAX_LEN = opt.max_len
+    MIN_FREQ = opt.min_word_count
+
+    def filter_examples_with_length(x):
+        return len(vars(x)['src']) <= MAX_LEN and len(vars(x)['trg']) <= MAX_LEN
+
+    train_raw = get_raw_data('../data/','train')
+    val_raw = get_raw_data('../data/','val')
+
+    train = pd.DataFrame(train_raw,columns=['src','trg'])
+    val = pd.DataFrame(val_raw,columns=['src','trg'])
+
+    train.to_json('train.json',orient='records',lines = True) 
+    val.to_json('val.json',orient='records',lines = True) 
+
+    train.to_csv('train.csv',index=False)
+    val.to_csv('val.csv',index=False)
+    
+    fields = {'src':('src',SRC),'trg':('trg',TRG)}
+    train, val = torchtext.data.TabularDataset.splits(
+        path='',
+        train='train.csv',
+        validation='val.csv',
+        format='csv',
+        fields = fields,
+        filter_pred=filter_examples_with_length
+    )
+    # train, val, test = torchtext.datasets.Multi30k.splits(
+    #         exts = ('.' + opt.lang_src, '.' + opt.lang_trg),
+    #         fields = (SRC, TRG),
+    #         filter_pred=filter_examples_with_length)
+    
+    SRC.build_vocab(train.src, min_freq=MIN_FREQ)
+    print('[Info] Get source language vocabulary size:', len(SRC.vocab))
+    TRG.build_vocab(train.trg, min_freq=MIN_FREQ)
+    print('[Info] Get target language vocabulary size:', len(TRG.vocab))
+
+    if opt.share_vocab:
+        print('[Info] Merging two vocabulary ...')
+        for w, _ in SRC.vocab.stoi.items():
+            # TODO: Also update the `freq`, although it is not likely to be used.
+            if w not in TRG.vocab.stoi:
+                TRG.vocab.stoi[w] = len(TRG.vocab.stoi)
+        TRG.vocab.itos = [None] * len(TRG.vocab.stoi)
+        for w, i in TRG.vocab.stoi.items():
+            TRG.vocab.itos[i] = w
+        SRC.vocab.stoi = TRG.vocab.stoi
+        SRC.vocab.itos = TRG.vocab.itos
+        print('[Info] Get merged vocabulary size:', len(TRG.vocab))
+
+
+    data = {
+        'settings': opt,
+        'vocab': {'src': SRC, 'trg': TRG},
+        'train': train.examples,
+        'valid': val.examples
+    }
+
+    print('[Info] Dumping the processed data to pickle file', opt.save_data)
+    pickle.dump(data, open(opt.save_data, 'wb'))
 
 def main_wo_bpe():
     '''
@@ -300,7 +413,7 @@ def main_wo_bpe():
             exts = ('.' + opt.lang_src, '.' + opt.lang_trg),
             fields = (SRC, TRG),
             filter_pred=filter_examples_with_length)
-
+    
     SRC.build_vocab(train.src, min_freq=MIN_FREQ)
     print('[Info] Get source language vocabulary size:', len(SRC.vocab))
     TRG.build_vocab(train.trg, min_freq=MIN_FREQ)
@@ -332,5 +445,6 @@ def main_wo_bpe():
 
 
 if __name__ == '__main__':
-    main_wo_bpe()
-    #main()
+    # main_wo_bpe()
+    # main()
+    main_vi()

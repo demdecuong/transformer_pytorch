@@ -168,9 +168,9 @@ class Transformer(nn.Module):
 
         self.trg_word_prj = nn.Linear(d_model, n_trg_vocab, bias=False)
 
-        for p in self.parameters():
-            if p.dim() > 1:
-                nn.init.xavier_uniform_(p) 
+        # for p in self.parameters():
+        #     if p.dim() > 1:
+        #         nn.init.xavier_uniform_(p) 
 
         assert d_model == d_word_vec, \
         'To facilitate the residual connections, \
@@ -179,7 +179,7 @@ class Transformer(nn.Module):
         if trg_emb_prj_weight_sharing:
             # Share the weight between target word embedding & last dense layer
             self.trg_word_prj.weight = self.decoder.trg_word_emb.weight
-
+            
         if emb_src_trg_weight_sharing:
             self.encoder.src_word_emb.weight = self.decoder.trg_word_emb.weight
 

@@ -4,6 +4,10 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+# Checkpoint folder
+checkpoint/
+prediction.txt
+vi_data.pkl
 *.swp
 
 # C extensions

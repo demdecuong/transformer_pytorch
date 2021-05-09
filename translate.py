@@ -9,6 +9,7 @@ import transformer.Constants as Constants
 from torchtext.data import Dataset
 from transformer.Models import Transformer
 from transformer.Translator import Translator
+from rouge_score import rouge_scorer
 
 
 def load_model(opt, device):
@@ -77,7 +78,8 @@ def main():
     opt.trg_bos_idx = TRG.vocab.stoi[Constants.BOS_WORD]
     opt.trg_eos_idx = TRG.vocab.stoi[Constants.EOS_WORD]
 
-    test_loader = Dataset(examples=data['test'], fields={'src': SRC, 'trg': TRG})
+    # test_loader = Dataset(examples=data['test'], fields={'src': SRC, 'trg': TRG})
+    test_loader = Dataset(examples=data['valid'], fields={'src': SRC, 'trg': TRG})
     
     device = torch.device('cuda' if opt.cuda else 'cpu')
     translator = Translator(
@@ -90,6 +92,12 @@ def main():
         trg_eos_idx=opt.trg_eos_idx).to(device)
 
     unk_idx = SRC.vocab.stoi[SRC.unk_token]
+    
+    r1 = []
+    r2 = []
+    rl = []
+    scorer = rouge_scorer.RougeScorer(['rouge1','rouge2','rougeL'], use_stemmer=True)
+
     with open(opt.output, 'w') as f:
         for example in tqdm(test_loader, mininterval=2, desc='  - (Test)', leave=False):
             #print(' '.join(example.src))
@@ -97,9 +105,18 @@ def main():
             pred_seq = translator.translate_sentence(torch.LongTensor([src_seq]).to(device))
             pred_line = ' '.join(TRG.vocab.itos[idx] for idx in pred_seq)
             pred_line = pred_line.replace(Constants.BOS_WORD, '').replace(Constants.EOS_WORD, '')
-            #print(pred_line)
-            f.write(pred_line.strip() + '\n')
 
+            trg = [TRG.vocab.stoi.get(word, unk_idx) for word in example.trg]
+            trg = ' '.join(TRG.vocab.itos[idx] for idx in trg)
+            scores = scorer.score(pred_line,trg)
+            r1.append(scores['rouge1'].fmeasure)
+            r2.append(scores['rouge2'].fmeasure)
+            rl.append(scores['rougeL'].fmeasure)
+
+            f.write(pred_line.strip() + '\n')
+    print("R1 = ",round(sum(r1)/len(r1),6))
+    print("R2 = ",round(sum(r2)/len(r2),6))
+    print("RL = ",round(sum(rl)/len(rl),6))
     print('[Info] Finished.')
 
 if __name__ == "__main__":

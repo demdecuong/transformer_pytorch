@@ -225,7 +225,7 @@ def main():
     parser.add_argument('-n_layers', type=int, default=6)
     parser.add_argument('-warmup','--n_warmup_steps', type=int, default=4000)
     parser.add_argument('-lr_mul', type=float, default=2.0)
-    parser.add_argument('-seed', type=int, default=None)
+    parser.add_argument('-seed', type=int, default=2804)
 
     parser.add_argument('-dropout', type=float, default=0.1)
     parser.add_argument('-embs_share_weight', action='store_true')
